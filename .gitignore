@@ -8,7 +8,7 @@ __pycache__/
 .pytest_cache/
 *.egg-info/
 
-# Node (Week 5 UI)
+# Node (web UI)
 node_modules/
 dist/
 

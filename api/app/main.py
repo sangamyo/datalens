@@ -1,12 +1,22 @@
+from contextlib import asynccontextmanager
+
 from fastapi import Depends, FastAPI, HTTPException
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.db import get_db
-from app.routers import datasets
+from app.routers import datasets, exports, qc, samples, search
 
-app = FastAPI(title="EpisodeHub API", version="0.1.0")
-app.include_router(datasets.router)
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Schema migrations run in the container entrypoint (alembic upgrade head), not here.
+    yield
+
+
+app = FastAPI(title="DataLens API", version="0.3.0", lifespan=lifespan)
+for r in (datasets, samples, qc, search, exports):
+    app.include_router(r.router)
 
 
 @app.get("/health")

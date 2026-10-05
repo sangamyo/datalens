@@ -1,7 +1,13 @@
+name: datalens
+
 services:
   api:
     build: ./api
     env_file: .env
+    environment:
+      HF_HOME: /hf-cache
+    volumes:
+      - hfcache:/hf-cache
     ports:
       - "8000:8000"
     depends_on:
@@ -16,12 +22,19 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 30s   # alembic upgrade head runs before uvicorn starts
 
   worker:
     build: ./api
     command: ["arq", "app.worker.WorkerSettings"]
     env_file: .env
+    environment:
+      HF_HOME: /hf-cache
+    volumes:
+      - hfcache:/hf-cache
     depends_on:
+      api:
+        condition: service_healthy   # the API container runs migrations; don't race them
       db:
         condition: service_healthy
       redis:
@@ -36,7 +49,10 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
     ports:
-      - "5432:5432"
+      # Host port 5434 (not 5432/5433): a local Postgres often already owns 5432, so
+      # host tools would silently hit the wrong server. Containers use db:5432.
+      # From the host: postgresql+psycopg://datalens:<password>@localhost:5434/datalens
+      - "127.0.0.1:5434:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -78,3 +94,4 @@ volumes:
   pgdata:
   redisdata:
   s3data:
+  hfcache:

@@ -1,76 +1,155 @@
-# EpisodeHub
+# DataLens
 
-Import open robot-learning datasets (Hugging Face LeRobot format), find bad episodes with automated quality checks, and search episodes in natural language.
+Data-quality platform for LLM fine-tuning datasets. Import an instruction or chat dataset from the
+Hugging Face Hub, get 8 automatic quality checks on every sample, find problem rows with
+natural-language search, and export a clean, reproducible train/val split as JSONL.
 
-**Status:** Week 2: foundation. The stack runs and health checks pass; the features below are not built yet.
+![Datasets](docs/screenshots/datasets.png)
+
+## Features
+
+- **Import from Hugging Face** — any public instruction/chat dataset (parquet, JSONL or JSON), up to
+  20,000 rows per import. Columns are auto-detected (`instruction`/`prompt`/`question` → prompt,
+  `context`/`input` → context, `response`/`output`/`answer` → response, `category`, or a chat
+  `messages`/`conversations` column), or set manually. The imported HF revision is recorded.
+- **8 quality checks per sample**, run in a background worker:
+  `empty_or_short`, `length_outlier` (robust z-score), `exact_duplicate`, `near_duplicate`
+  (MinHash + LSH), `pii` (email, phone, IP, Luhn-valid cards, Aadhaar, API keys), `non_english`,
+  `refusal_boilerplate` ("As an AI language model…"), `formatting` (unclosed code fences, repeated
+  characters, prompt echo, truncation). Each sample gets `pass` / `warn` / `fail` and a score.
+- **Dashboard** — QC summary, per-check breakdown, categories and token-length histogram, all
+  click-to-filter; paginated samples table; filters live in the URL.
+- **Sample viewer** — prompt / context / response with PII highlighted inline, links between duplicates,
+  every check's result and details, prev/next with `[` / `]`, per-sample QC re-run.
+- **Natural-language search** — "brainstorming samples that need review" → a validated `SampleFilter`
+  (never SQL). Uses Gemini or Claude if a key is configured, otherwise (or on any LLM error) a
+  deterministic rule-based parser.
+- **Export** — filtered subset as a zip with `train.jsonl`, `val.jsonl` and `manifest.json`; `jsonl`
+  (`prompt/context/response/category`) or `chat` (`messages`) format; deterministic split.
+
+On the full `databricks/databricks-dolly-15k` (15,011 rows) import takes ~7 s and QC ~15 s, and it finds
+16 exact duplicates, 341 repeated prompts with different answers, 9 near duplicates, 8 rows with PII,
+6 refusal answers, 819 very short answers, 13 length outliers and 2 non-English rows.
+
+| Dataset dashboard | Sample viewer |
+|---|---|
+| ![Dataset](docs/screenshots/dataset.png) | ![Sample](docs/screenshots/sample.png) |
+
+| Search + export |
+|---|
+| ![Export](docs/screenshots/export.png) |
+
+## Architecture
+
+FastAPI + SQLAlchemy 2 + Alembic · Postgres 16 with pgvector · Redis + arq worker · SeaweedFS (S3 API) ·
+React 19 + TypeScript + Vite. The browser calls `/api/*`, which the Vite dev server proxies to the API on
+port 8000 (no CORS needed). Sample text lives in Postgres; raw downloaded parquet and export zips live in
+object storage.
+
+```
+browser ──/api──▶ FastAPI ──▶ Postgres (datasets, samples, qc_results, exports)
+                     │  └───▶ Redis ──▶ arq worker ──▶ Hugging Face Hub
+                     │                      ├──────▶ Postgres
+                     └──── S3 (SeaweedFS) ◀─┘ raw parquet, export zips
+```
+
+Details: [docs/design.md](docs/design.md) · endpoints: [docs/api-contract.md](docs/api-contract.md) ·
+full code walkthrough and interview notes: [docs/walkthrough.md](docs/walkthrough.md).
 
 ## Quickstart
 
-```bash
-cp .env.example .env        # then change the passwords
-docker compose up --build
-curl http://localhost:8000/health        # {"status":"ok"}
-curl http://localhost:8000/health/ready  # {"status":"ready"} once Postgres is up
-```
+Requirements: Docker (with compose), Node 20.19+ (Vite 8).
 
-- API docs: http://localhost:8000/docs
-- S3 API (SeaweedFS): http://localhost:8333
-
-Run tests without Docker:
+**Backend** (API, worker, Postgres, Redis, S3):
 
 ```bash
-cd api
-python3.11 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-python -m pytest
+cp .env.example .env          # change the passwords
+docker compose up -d --build  # migrations run automatically when the API starts
+curl http://localhost:8000/health/ready   # {"status":"ready"}
 ```
 
+- API docs (Swagger): http://localhost:8000/docs
+- Postgres from the host: `localhost:5434` (5432 is left free for a local Postgres)
+- Worker logs: `docker compose logs -f worker`
 
-### Frontend (React + Vite)
+**Frontend:**
 
 ```bash
 cd web
 npm install
-npm run dev        # http://localhost:5173 — proxies /api/* to the API on :8000
+npm run dev                   # http://localhost:5173 (proxies /api to http://localhost:8000; override with API_URL)
 ```
 
-## Architecture
+Open http://localhost:5173, pick an example (e.g. `databricks/databricks-dolly-15k`) and click **Import**.
+Or from the command line:
 
-FastAPI + Postgres/pgvector + Redis/arq worker + S3 storage (SeaweedFS) + React. See [docs/design.md](docs/design.md).
+```bash
+curl -X POST localhost:8000/datasets/import -H 'content-type: application/json' \
+  -d '{"hf_repo_id": "databricks/databricks-dolly-15k", "max_samples": 15011}'
+```
 
-## Roadmap / TODO for me
+### Optional: LLM-powered search
 
-- [ ] **Week 2: Foundation**
-  - [ ] Run `docker compose up --build` on my machine and confirm all five services are healthy
-  - [x] `GET /health` returns `{"status":"ok"}`, `GET /health/ready` checks the DB
-  - [x] Four tables defined in `api/app/models.py`; CI runs pytest
-- [ ] **Week 3: Import**
-  - [ ] Add Alembic; first migration creates the `vector` extension and all four tables
-  - [ ] `POST /datasets/import {"hf_repo_id":"lerobot/pusht"}` stores pusht metadata (fps, robot_type, all episodes with length/duration) in Postgres and its video files in S3 storage
-  - [ ] `GET /datasets` lists it with `status: "ready"` and the correct `num_episodes`
-  - [ ] Importing the same repo twice returns 409
-  - [ ] Tests for both endpoints (DB tests can use a Postgres service container in CI)
-- [ ] **Week 4: QC workers**
-  - [ ] Six checks implemented as pure functions with one unit test each, using synthetic data (gap, dropped, frozen, joint-limit, velocity spike, length outlier)
-  - [ ] `POST /datasets/{id}/qc` enqueues one `run_qc` job per episode; the worker writes `qc_results` rows
-  - [ ] Every pusht episode ends with `qc_status` in pass/warn/fail; `GET /datasets/{id}` returns counts per status
-- [ ] **Week 5: React UI**
-  - [ ] Datasets page with an import form
-  - [ ] Episodes table with QC badges, filter by status, pagination
-  - [ ] Episode detail page plays the video (presigned S3 URL) and lists failed checks
-- [ ] **Week 6: NL search + export**
-  - [ ] `POST /search {"query":"failed episodes shorter than 5 seconds"}` → LLM returns JSON that validates against a Pydantic `EpisodeFilter`; invalid JSON returns 422, never raw SQL
-  - [ ] Filter → SQLAlchemy query is unit-tested without calling the LLM
-  - [ ] Episode embeddings stored in `embeddings`; free-text part ranked by pgvector cosine distance
-  - [ ] `GET /datasets/{id}/export?format=csv` downloads the filtered episode list
-- [ ] **Week 7: Polish**
-  - [ ] Test coverage on core logic, CI green with Postgres service
-  - [ ] Deployed somewhere public with a live URL
-  - [ ] README with screenshots, design decisions, and a 2-minute demo video
+Natural-language search works without any key (rule-based parser). To let an LLM parse queries, set one
+of these in `.env` and restart the API (`docker compose up -d api`):
+
+```bash
+GEMINI_API_KEY=...       # gemini-2.0-flash
+ANTHROPIC_API_KEY=...    # claude-haiku-4-5
+```
+
+Only the query text is sent to the LLM; its JSON answer is strictly validated and any error falls back to
+the rule parser. The search response says which parser was used. `HF_TOKEN` is only needed for gated or
+private Hugging Face datasets.
+
+## Tests
+
+```bash
+cd api
+python3.11 -m venv .venv && .venv/bin/pip install -r requirements.txt
+.venv/bin/python -m pytest -q     # 265 tests, no Docker or network needed (in-memory SQLite, mocked queue/S3/Hub)
+
+cd ../web
+npm run build && npm run lint     # type-check + build, oxlint
+```
+
+CI (`.github/workflows/ci.yml`) runs the backend tests on every push.
+
+## Project structure
+
+```
+api/
+  app/
+    main.py            FastAPI app, /health, /health/ready
+    config.py db.py    settings, engine/session
+    models.py          SQLAlchemy models: Dataset, Sample, QCResult, Export, Embedding
+    schemas.py         Pydantic request/response models (SampleFilter, ...)
+    queries.py         SampleFilter -> SQLAlchemy WHERE clauses (shared by list, search, export)
+    nlsearch.py        natural-language query -> SampleFilter (LLM + rule-based fallback)
+    storage.py queue.py worker.py   S3 wrapper, arq enqueue, arq WorkerSettings
+    routers/           datasets, samples, qc, search, exports
+    jobs/              import_job, qc_job, export_job (arq jobs)
+    qc/                checks.py (8 pure checks), dataset_stats.py (length stats, duplicates, MinHash/LSH)
+  alembic/             migrations
+  tests/               pytest suite
+web/
+  src/
+    api/               typed client + types mirroring schemas.py
+    pages/             DatasetsPage, DatasetDetailPage, SamplePage
+    components/        dataset/ (cards, charts, search, table, export), sample/ (rich text, QC list), shared UI
+    hooks/ lib/        data fetching/polling, filter <-> URL, text/PII helpers
+docs/
+  design.md            design doc
+  api-contract.md      API contract (source of truth for backend + frontend)
+  walkthrough.md       file-by-file tour, design decisions, interview prep, exercises
+  screenshots/
+docker-compose.yml     api, worker, db, redis, s3
+```
 
 ## Data
 
-Public open datasets only (e.g. [lerobot/pusht](https://huggingface.co/datasets/lerobot/pusht)). No proprietary data.
+Public datasets only (e.g. `databricks/databricks-dolly-15k`, `tatsu-lab/alpaca`,
+`HuggingFaceH4/no_robots`, `openai/gsm8k`). Each dataset keeps its own license.
 
 ## License
 

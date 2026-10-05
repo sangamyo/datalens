@@ -11,6 +11,6 @@ def test_health_returns_ok_without_database() -> None:
     assert response.json() == {"status": "ok"}
 
 
-def test_dataset_endpoints_are_stubbed() -> None:
-    assert client.get("/datasets").status_code == 501
-    assert client.post("/datasets/import", json={"hf_repo_id": "lerobot/pusht"}).status_code == 501
+def test_import_rejects_invalid_repo_id_without_database() -> None:
+    # Dataset endpoints are implemented now (they used to return 501); validation needs no DB.
+    assert client.post("/datasets/import", json={"hf_repo_id": "not a repo"}).status_code == 422

@@ -1,27 +1,21 @@
 """Background worker. Start with: arq app.worker.WorkerSettings"""
 
-from typing import Any
+import logging
 
 from arq.connections import RedisSettings
 
 from app.config import get_settings
+from app.jobs.export_job import build_export
+from app.jobs.import_job import import_dataset
+from app.jobs.qc_job import run_dataset_qc, run_sample_qc
 
 
-async def run_qc(ctx: dict[str, Any], episode_id: int) -> None:
-    """TODO (Week 4): run all quality checks for one episode.
-
-    1. Load the Episode (and its Dataset for fps) from Postgres.
-    2. Load its frame data (parquet: timestamps, observation.state) from S3 storage / HF.
-    3. Run each check as a pure function returning (check_name, passed, severity, details):
-       timestamp_gap, dropped_frames, frozen_frames, joint_limit, velocity_spike, length_outlier.
-    4. Delete old QCResult rows for this episode, insert the new ones.
-    5. Set Episode.qc_status to the worst severity ("pass" / "warn" / "fail").
-
-    Enqueue from the API with: `await redis.enqueue_job("run_qc", episode_id)`.
-    """
-    raise NotImplementedError("run_qc is a Week 4 TODO")
+# Show app log lines (import/QC timings) alongside arq's own job logs.
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
 
 class WorkerSettings:
-    functions = [run_qc]
+    functions = [import_dataset, run_dataset_qc, run_sample_qc, build_export]
     redis_settings = RedisSettings.from_dsn(get_settings().redis_url)
+    max_jobs = 4
+    job_timeout = 1800  # large imports / dataset-wide QC can take minutes
