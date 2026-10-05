@@ -1,0 +1,19 @@
+.page { max-width: 880px; margin: 0 auto; padding: 32px 16px 64px; display: flex; flex-direction: column; gap: 16px; }
+.top h1 { margin: 0; font-size: 28px; }
+.muted { color: var(--muted); }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 18px; }
+.card h2 { margin: 0 0 12px; font-size: 17px; }
+.checks { display: flex; flex-wrap: wrap; gap: 12px; }
+.check { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 8px; }
+.check .label { font-weight: 600; }
+.dot { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); }
+.check.ok .dot { background: var(--good); }
+.check.down .dot { background: var(--bad); }
+.note { background: var(--note); padding: 10px 12px; border-radius: 8px; margin: 0; }
+.error { color: var(--bad); margin: 0; }
+code { font-family: ui-monospace, Menlo, monospace; font-size: 13px; }
+table { width: 100%; border-collapse: collapse; }
+th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+.todo { margin: 0; padding-left: 18px; }
+.todo li { margin: 4px 0; }
+.todo b { display: inline-block; min-width: 64px; }

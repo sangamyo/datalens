@@ -25,6 +25,15 @@ pip install -r requirements.txt
 python -m pytest
 ```
 
+
+### Frontend (React + Vite)
+
+```bash
+cd web
+npm install
+npm run dev        # http://localhost:5173 — proxies /api/* to the API on :8000
+```
+
 ## Architecture
 
 FastAPI + Postgres/pgvector + Redis/arq worker + S3 storage (SeaweedFS) + React. See [docs/design.md](docs/design.md).
