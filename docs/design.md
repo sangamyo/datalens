@@ -28,7 +28,7 @@ flowchart LR
     API -->|enqueue jobs| R[(Redis)]
     W[arq worker] -->|dequeue jobs| R
     W -->|read/write QC results| DB
-    W -->|read episode files| S3[(MinIO object storage)]
+    W -->|read episode files| S3[(S3 object storage - SeaweedFS)]
     API -->|upload/presign| S3
     API -->|NL query -> filter JSON| LLM[LLM provider]
     HF[Hugging Face Hub] -->|download dataset| API
@@ -41,7 +41,7 @@ The API and worker share one codebase and Docker image; the worker just runs `ar
 | Table | Key columns |
 |---|---|
 | `datasets` | `id`, `hf_repo_id` (unique, e.g. `lerobot/pusht`), `name`, `fps`, `robot_type`, `num_episodes`, `status` (`importing`/`ready`/`failed`), `created_at` |
-| `episodes` | `id`, `dataset_id` → datasets, `episode_index`, `length_frames`, `duration_s`, `task`, `video_key` (object path in MinIO), `qc_status` (`pending`/`pass`/`warn`/`fail`), `created_at` |
+| `episodes` | `id`, `dataset_id` → datasets, `episode_index`, `length_frames`, `duration_s`, `task`, `video_key` (object path in S3 storage), `qc_status` (`pending`/`pass`/`warn`/`fail`), `created_at` |
 | `qc_results` | `id`, `episode_id` → episodes, `check_name`, `passed`, `severity`, `details` (JSONB), `created_at` |
 | `embeddings` | `id`, `episode_id` → episodes (unique), `model`, `text` (what was embedded), `embedding` (pgvector `vector(N)`), `created_at` |
 

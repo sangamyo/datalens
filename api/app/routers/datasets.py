@@ -18,7 +18,7 @@ def import_dataset(req: ImportRequest) -> None:
        (hf_hub_download / snapshot_download with allow_patterns).
     4. Fill Dataset.fps, robot_type, num_episodes from info.json.
     5. For each episode: insert an `Episode` row (episode_index, length_frames,
-       duration_s = length / fps, task) and upload its video file(s) to MinIO
+       duration_s = length / fps, task) and upload its video file(s) to S3 storage
        under "<hf_repo_id>/videos/...", storing the object key in `video_key`.
     6. Set status="ready" (or "failed" on error) and return the dataset as JSON.
 

@@ -39,7 +39,7 @@ class Episode(Base):
     length_frames: Mapped[int] = mapped_column(Integer)
     duration_s: Mapped[float] = mapped_column(Float)
     task: Mapped[str | None] = mapped_column(Text)
-    video_key: Mapped[str | None] = mapped_column(String(512))  # object path in MinIO
+    video_key: Mapped[str | None] = mapped_column(String(512))  # object path in S3 storage
     qc_status: Mapped[str] = mapped_column(String(20), default="pending", index=True)  # pending | pass | warn | fail
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 

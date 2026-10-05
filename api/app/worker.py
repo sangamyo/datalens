@@ -11,7 +11,7 @@ async def run_qc(ctx: dict[str, Any], episode_id: int) -> None:
     """TODO (Week 4): run all quality checks for one episode.
 
     1. Load the Episode (and its Dataset for fps) from Postgres.
-    2. Load its frame data (parquet: timestamps, observation.state) from MinIO / HF.
+    2. Load its frame data (parquet: timestamps, observation.state) from S3 storage / HF.
     3. Run each check as a pure function returning (check_name, passed, severity, details):
        timestamp_gap, dropped_frames, frozen_frames, joint_limit, velocity_spike, length_outlier.
     4. Delete old QCResult rows for this episode, insert the new ones.

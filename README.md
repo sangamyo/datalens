@@ -14,7 +14,7 @@ curl http://localhost:8000/health/ready  # {"status":"ready"} once Postgres is u
 ```
 
 - API docs: http://localhost:8000/docs
-- MinIO console: http://localhost:9001
+- S3 API (SeaweedFS): http://localhost:8333
 
 Run tests without Docker:
 
@@ -27,7 +27,7 @@ python -m pytest
 
 ## Architecture
 
-FastAPI + Postgres/pgvector + Redis/arq worker + MinIO + React. See [docs/design.md](docs/design.md).
+FastAPI + Postgres/pgvector + Redis/arq worker + S3 storage (SeaweedFS) + React. See [docs/design.md](docs/design.md).
 
 ## Roadmap / TODO for me
 
@@ -37,7 +37,7 @@ FastAPI + Postgres/pgvector + Redis/arq worker + MinIO + React. See [docs/design
   - [x] Four tables defined in `api/app/models.py`; CI runs pytest
 - [ ] **Week 3: Import**
   - [ ] Add Alembic; first migration creates the `vector` extension and all four tables
-  - [ ] `POST /datasets/import {"hf_repo_id":"lerobot/pusht"}` stores pusht metadata (fps, robot_type, all episodes with length/duration) in Postgres and its video files in MinIO
+  - [ ] `POST /datasets/import {"hf_repo_id":"lerobot/pusht"}` stores pusht metadata (fps, robot_type, all episodes with length/duration) in Postgres and its video files in S3 storage
   - [ ] `GET /datasets` lists it with `status: "ready"` and the correct `num_episodes`
   - [ ] Importing the same repo twice returns 409
   - [ ] Tests for both endpoints (DB tests can use a Postgres service container in CI)
@@ -48,7 +48,7 @@ FastAPI + Postgres/pgvector + Redis/arq worker + MinIO + React. See [docs/design
 - [ ] **Week 5: React UI**
   - [ ] Datasets page with an import form
   - [ ] Episodes table with QC badges, filter by status, pagination
-  - [ ] Episode detail page plays the video (presigned MinIO URL) and lists failed checks
+  - [ ] Episode detail page plays the video (presigned S3 URL) and lists failed checks
 - [ ] **Week 6: NL search + export**
   - [ ] `POST /search {"query":"failed episodes shorter than 5 seconds"}` → LLM returns JSON that validates against a Pydantic `EpisodeFilter`; invalid JSON returns 422, never raw SQL
   - [ ] Filter → SQLAlchemy query is unit-tested without calling the LLM
