@@ -5,7 +5,7 @@ colorFrom: indigo
 colorTo: blue
 sdk: static
 pinned: false
-short_description: Data-quality checks + semantic search for LLM fine-tuning data
+short_description: QC + semantic search for LLM fine-tuning datasets
 ---
 
 # DataLens — static demo

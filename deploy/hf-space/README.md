@@ -6,7 +6,7 @@ colorTo: blue
 sdk: docker
 app_port: 7860
 pinned: false
-short_description: Data-quality checks + semantic search for LLM fine-tuning datasets
+short_description: QC + semantic search for LLM fine-tuning datasets
 ---
 
 # DataLens — live demo
