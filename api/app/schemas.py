@@ -152,6 +152,30 @@ class SearchResponse(BaseModel):
     total: int
 
 
+# ---------- semantic search (embeddings) ----------
+class EmbeddingStatus(BaseModel):
+    model: str
+    dim: int
+    embedded: int  # samples of the dataset with a vector for `model`
+    total: int  # samples in the dataset
+
+
+class SemanticSearchRequest(BaseModel):
+    query: str = Field(min_length=1, max_length=500)
+    dataset_id: int
+    limit: int = Field(default=25, ge=1, le=100)
+    filter: SampleFilter = SampleFilter()  # optional structured filter on top; its dataset_id is ignored
+
+
+class SimilarSample(SampleOut):
+    similarity: float  # cosine similarity (1 - cosine distance); 1 = same direction
+
+
+class SemanticSearchResponse(BaseModel):
+    model: str
+    items: list[SimilarSample]
+
+
 # ---------- exports ----------
 class ExportCreate(BaseModel):
     dataset_id: int

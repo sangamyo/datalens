@@ -590,5 +590,6 @@ async def import_dataset(
         await asyncio.to_thread(_set_status, dataset_id, status="failed", error=msg[:MAX_ERROR_LEN])
         return 0
     await ctx["redis"].enqueue_job("run_dataset_qc", dataset_id)
-    log.info("dataset %s ready: %d samples, QC enqueued", dataset_id, n)
+    await ctx["redis"].enqueue_job("embed_dataset", dataset_id)
+    log.info("dataset %s ready: %d samples, QC and embeddings enqueued", dataset_id, n)
     return n

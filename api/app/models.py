@@ -7,13 +7,13 @@ from datetime import datetime
 from typing import Any
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy import JSON, Boolean, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db import Base
 
-# Must match the embedding model if semantic search is added (e.g. 384 for bge-small / all-MiniLM-L6-v2).
+# Must match the embedding model (app/embeddings.py: BAAI/bge-small-en-v1.5 -> 384).
 EMBEDDING_DIM = 384
 
 JSONType = JSON().with_variant(JSONB(), "postgresql")
@@ -95,12 +95,22 @@ class Export(Base):
 
 
 class Embedding(Base):
-    """Reserved for semantic search over samples (pgvector)."""
+    """One sentence embedding per sample (prompt + response), for semantic search (pgvector)."""
 
     __tablename__ = "embeddings"
+    __table_args__ = (
+        # Approximate nearest-neighbour index for `embedding <=> query` (cosine distance), migration 0002.
+        Index(
+            "ix_embeddings_embedding_hnsw",
+            "embedding",
+            postgresql_using="hnsw",
+            postgresql_with={"m": 16, "ef_construction": 64},
+            postgresql_ops={"embedding": "vector_cosine_ops"},
+        ),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     sample_id: Mapped[int] = mapped_column(ForeignKey("samples.id", ondelete="CASCADE"), unique=True)
-    model: Mapped[str] = mapped_column(String(100))
+    model: Mapped[str] = mapped_column(String(100))  # e.g. "BAAI/bge-small-en-v1.5"
     embedding: Mapped[list[float]] = mapped_column(Vector(EMBEDDING_DIM))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

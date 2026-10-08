@@ -22,6 +22,8 @@ the Hugging Face Hub, (b) see at a glance what is wrong with it, (c) drill into 
 - Sample viewer with inline PII highlights and links between duplicates.
 - Natural-language search ("near duplicates in brainstorming") that is safe: the query becomes a
   validated filter object, never SQL.
+- Semantic search: rank samples by meaning (sentence embeddings + pgvector), combinable with the
+  filters, and "similar samples" for any row.
 - Export a filtered subset as a deterministic train/val split (`jsonl` or `chat` format) in a zip with
   a manifest that records source revision, filter and counts.
 
@@ -49,7 +51,7 @@ flowchart LR
 - **API** (`api/app/main.py`, `routers/`): validates input with Pydantic, reads/writes Postgres,
   enqueues jobs and returns `202` for long work. Runs `alembic upgrade head` on start.
 - **Worker** (`app/worker.py`, `app/jobs/`): arq jobs `import_dataset`, `run_dataset_qc`,
-  `run_sample_qc`, `build_export`. Blocking work runs in `asyncio.to_thread`.
+  `run_sample_qc`, `embed_dataset`, `build_export`. Blocking work runs in `asyncio.to_thread`.
 - **Postgres**: all metadata *and* sample text (it is small: dolly-15k is ~11 MB of text).
 - **Object storage** (SeaweedFS, S3 API): raw downloaded parquet (`datasets/{id}/raw/{n}.parquet`)
   for provenance, and export zips (`exports/{id}.zip`).
@@ -63,10 +65,10 @@ flowchart LR
 | `samples` | `dataset_id` (FK, cascade), `sample_index` (row number, unique per dataset), `prompt`, `context`, `response`, `category`, `prompt_chars`, `response_chars`, `tokens_est` (≈ chars / 4), `lang`, `content_hash` (sha1 of normalised text), `qc_status` (`pending\|pass\|warn\|fail`), `qc_score` (share of checks passed) |
 | `qc_results` | `sample_id` (FK, cascade), `check_name`, `passed`, `severity`, `message`, `details` (JSONB: PII spans, duplicate ids, z-scores…) |
 | `exports` | `dataset_id`, `filter` (JSONB SampleFilter), `val_ratio`, `format` (`jsonl\|chat`), `status`, `num_samples`, `s3_key` |
-| `embeddings` | `sample_id` (unique), `model`, `embedding vector(384)` — reserved for semantic search / dedup |
+| `embeddings` | `sample_id` (unique), `model` (`BAAI/bge-small-en-v1.5`), `embedding vector(384)` — one sentence embedding of prompt + response per sample, HNSW index (`vector_cosine_ops`) |
 
 Indexes: `samples(dataset_id)`, `samples(qc_status)`, `samples(category)`, `samples(content_hash)`,
-`qc_results(sample_id)`, `qc_results(check_name)`, `exports(dataset_id)`.
+`qc_results(sample_id)`, `qc_results(check_name)`, `exports(dataset_id)`, `embeddings` HNSW on `embedding` (cosine).
 
 ## Quality checks
 Every check is a pure function in `app/qc/checks.py` (strings/numbers in, `CheckResult` out). Dataset-wide
@@ -108,6 +110,25 @@ nothing dangerous to reach. Validation is cheap and testable without the LLM, th
 parsed filter as removable chips, and the same `SampleFilter` drives the samples list, search and
 export. Only the query text is sent to the LLM, never dataset contents.
 
+## Semantic search
+Structured filters answer "which rows are broken"; semantic search answers "which rows are *about* X"
+and "what else looks like this row".
+
+- **Embeddings**: the `embed_dataset` arq job (enqueued after import, or by
+  `POST /datasets/{id}/embeddings`) embeds `prompt + response` of every sample with
+  `BAAI/bge-small-en-v1.5` (384-dim, quantized ONNX through `fastembed`, CPU, no torch) and stores one
+  row per sample in `embeddings`. Texts are sorted by length before batching (32 per forward pass) so
+  batches carry almost no padding; every 512 vectors are committed, and only missing vectors are computed,
+  so the job is resumable and idempotent.
+- **Query**: `POST /search/semantic {query, dataset_id, limit, filter?}` embeds the query in the API process
+  (with bge's retrieval instruction prefix) and runs
+  `ORDER BY embedding <=> :q LIMIT k` joined to `samples` with the usual `SampleFilter` clauses — so
+  "semantic + failed QC + category" is one SQL query. `GET /samples/{id}/similar` does the same with the
+  sample's own vector.
+- **Index**: HNSW (`m=16, ef_construction=64`, cosine ops, migration `0002`). Filtered queries set
+  `hnsw.iterative_scan = strict_order` (pgvector ≥ 0.8) so the index keeps producing candidates until k rows
+  pass the filter.
+
 ## Export formats
 `POST /exports {dataset_id, filter, val_ratio, format}` → worker streams matching rows (in
 `sample_index` order, 1,000 per batch) into a zip:
@@ -141,5 +162,6 @@ Current design comfortably handles ~10⁵ samples per dataset on one machine. To
   keyset pagination instead of `OFFSET`, approximate counts.
 - **Workers**: more arq workers (stateless), per-job progress in Redis, export via server-side cursors
   straight into a multipart S3 upload.
-- **Semantic dedup**: fill `embeddings` with a small sentence model and use pgvector HNSW for
-  paraphrase-level duplicates.
+- **Semantic dedup**: `embeddings` + the HNSW index are in place; a `semantic_duplicate` check would query
+  each sample's nearest neighbour above a tuned cosine threshold. At 10⁷ vectors: more workers / a GPU
+  for embedding, `halfvec` (half the storage), and a partial or partitioned index per dataset.

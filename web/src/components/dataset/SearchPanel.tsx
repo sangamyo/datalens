@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { api } from '../../api/client'
-import type { CategoryCount, QCStatus, SampleFilter } from '../../api/types'
+import type { CategoryCount, EmbeddingStatus, QCStatus, SampleFilter } from '../../api/types'
 import { CHECK_NAMES, QC_STATUSES, checkLabel } from '../../api/types'
 import { cleanFilter, filterChips, type FilterKey } from '../../lib/filter'
 import { ErrorBanner } from '../ErrorBanner'
@@ -16,10 +16,28 @@ const EXAMPLES = [
   'non-English samples',
 ]
 
+const SEMANTIC_EXAMPLES = [
+  'how to cook pasta',
+  'travel tips for Europe',
+  'explain a physics concept',
+  'python programming help',
+  'advice about personal finance',
+]
+
+export type SearchMode = 'nl' | 'semantic'
+
+/** `nl`: the query was parsed into a SampleFilter. `semantic`: samples are ranked by embedding similarity
+ * to the query (the current filters still apply). */
 export interface SearchMeta {
   query: string
-  parser: 'llm' | 'rules'
+  mode: SearchMode
+  parser?: 'llm' | 'rules'
 }
+
+const MODES: { value: SearchMode; label: string }[] = [
+  { value: 'nl', label: 'Filters' },
+  { value: 'semantic', label: 'Semantic' },
+]
 
 export function SearchPanel({
   datasetId,
@@ -28,6 +46,8 @@ export function SearchPanel({
   onFilterChange,
   searchMeta,
   onSearch,
+  embeddings,
+  onBuildEmbeddings,
 }: {
   datasetId: number
   filter: SampleFilter
@@ -35,19 +55,41 @@ export function SearchPanel({
   onFilterChange: (f: SampleFilter, keepSearch?: boolean) => void
   searchMeta: SearchMeta | null
   onSearch: (meta: SearchMeta | null, f: SampleFilter) => void
+  embeddings?: EmbeddingStatus
+  onBuildEmbeddings: () => Promise<void>
 }) {
   const [query, setQuery] = useState(searchMeta?.query ?? '')
+  const [mode, setMode] = useState<SearchMode>(searchMeta?.mode ?? 'nl')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<unknown>(null)
+  const semantic = mode === 'semantic'
+  const noEmbeddings = semantic && embeddings?.embedded === 0
 
   const run = async (q: string) => {
     const text = q.trim()
     if (!text) return
+    if (semantic) {
+      // ranking happens in the samples query (DatasetDetailPage); keep the current filters
+      onSearch({ query: text, mode: 'semantic' }, filter)
+      return
+    }
     setBusy(true)
     setError(null)
     try {
       const res = await api.search({ query: text, dataset_id: datasetId, limit: 50 })
-      onSearch({ query: text, parser: res.parser }, cleanFilter(res.filter))
+      onSearch({ query: text, mode: 'nl', parser: res.parser }, cleanFilter(res.filter))
+    } catch (e) {
+      setError(e)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const buildEmbeddings = async () => {
+    setBusy(true)
+    setError(null)
+    try {
+      await onBuildEmbeddings()
     } catch (e) {
       setError(e)
     } finally {
@@ -73,13 +115,31 @@ export function SearchPanel({
       <div className="card__head">
         <div>
           <h2 id="search-heading">Find samples</h2>
-          <p>Describe what you’re looking for in plain English, or set filters manually.</p>
+          <p>
+            {semantic
+              ? 'Rank samples by meaning (sentence embeddings), within the current filters.'
+              : 'Describe what you’re looking for in plain English, or set filters manually.'}
+          </p>
+        </div>
+        <div className="segmented" role="radiogroup" aria-label="Search mode">
+          {MODES.map((m) => (
+            <label key={m.value} className="segmented__opt">
+              <input
+                type="radio"
+                name={`search-mode-${datasetId}`}
+                value={m.value}
+                checked={mode === m.value}
+                onChange={() => setMode(m.value)}
+              />
+              <span>{m.label}</span>
+            </label>
+          ))}
         </div>
       </div>
       <div className="card__body" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
         <form className="search-form" onSubmit={submit} role="search">
           <label htmlFor="nl-search" className="sr-only">
-            Natural-language sample search
+            {semantic ? 'Semantic sample search' : 'Natural-language sample search'}
           </label>
           <div className="search-input-wrap">
             <Icon name="search" size={15} />
@@ -89,25 +149,43 @@ export function SearchPanel({
               value={query}
               maxLength={500}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="e.g. open_qa samples with emails or phone numbers"
+              placeholder={
+                semantic ? 'e.g. questions about baking bread' : 'e.g. open_qa samples with emails or phone numbers'
+              }
               autoComplete="off"
             />
           </div>
-          <button type="submit" className="btn btn--primary" disabled={busy || !query.trim()}>
+          <button type="submit" className="btn btn--primary" disabled={busy || !query.trim() || noEmbeddings}>
             {busy ? <Spinner size={12} /> : <Icon name="sparkle" size={13} />}
             Search
           </button>
         </form>
 
+        {semantic && embeddings && embeddings.embedded < embeddings.total && (
+          <div className="embed-status" role="status">
+            {embeddings.embedded === 0 ? (
+              <span>No embeddings for this dataset yet.</span>
+            ) : (
+              <span>
+                <Spinner size={10} /> Embedding samples… {embeddings.embedded.toLocaleString()} of{' '}
+                {embeddings.total.toLocaleString()} — results only cover embedded samples.
+              </span>
+            )}
+            <button type="button" className="btn btn--sm" onClick={buildEmbeddings} disabled={busy}>
+              <Icon name="refresh" size={12} /> {embeddings.embedded === 0 ? 'Build embeddings' : 'Resume'}
+            </button>
+          </div>
+        )}
+
         <div className="examples" role="group" aria-label="Example searches">
           <span>Try:</span>
-          {EXAMPLES.map((ex) => (
+          {(semantic ? SEMANTIC_EXAMPLES : EXAMPLES).map((ex) => (
             <button
               key={ex}
               type="button"
               className="example-btn"
-              aria-pressed={searchMeta?.query === ex}
-              disabled={busy}
+              aria-pressed={searchMeta?.query === ex && searchMeta.mode === mode}
+              disabled={busy || noEmbeddings}
               onClick={() => {
                 setQuery(ex)
                 run(ex)
@@ -122,7 +200,13 @@ export function SearchPanel({
 
         {(chips.length > 0 || searchMeta) && (
           <div className="chips" aria-live="polite">
-            {searchMeta && (
+            {searchMeta?.mode === 'semantic' && (
+              <span className="pill pill--info" title={embeddings ? `Ranked by cosine similarity (${embeddings.model})` : undefined}>
+                <Icon name="sparkle" size={11} />
+                semantic: “{searchMeta.query}”
+              </span>
+            )}
+            {searchMeta?.mode === 'nl' && (
               <span
                 className={`pill ${searchMeta.parser === 'llm' ? 'pill--info' : 'pill--outline'}`}
                 title={searchMeta.parser === 'llm' ? 'Parsed by an LLM' : 'Parsed by the rule-based parser'}
@@ -139,7 +223,7 @@ export function SearchPanel({
                 </button>
               </span>
             ))}
-            {searchMeta && chips.length === 0 && (
+            {searchMeta?.mode === 'nl' && chips.length === 0 && (
               <span className="muted" style={{ fontSize: 12.5 }}>
                 The query didn’t map to any filter — showing all samples.
               </span>

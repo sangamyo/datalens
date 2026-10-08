@@ -1,6 +1,7 @@
 import type {
   DatasetDetail,
   DatasetOut,
+  EmbeddingStatus,
   Enqueued,
   ExportCreate,
   ExportOut,
@@ -12,6 +13,9 @@ import type {
   SampleList,
   SearchRequest,
   SearchResponse,
+  SemanticSearchRequest,
+  SemanticSearchResponse,
+  SimilarSample,
 } from './types'
 
 export const API_BASE = '/api'
@@ -119,6 +123,13 @@ export const api = {
   // search
   search: (body: SearchRequest) =>
     request<SearchResponse>('/search', { method: 'POST', body: json(body) }),
+
+  // semantic search (embeddings)
+  getEmbeddingStatus: (datasetId: number) => request<EmbeddingStatus>(`/datasets/${datasetId}/embeddings`),
+  embedDataset: (datasetId: number) => request<Enqueued>(`/datasets/${datasetId}/embeddings`, { method: 'POST' }),
+  semanticSearch: (body: SemanticSearchRequest) =>
+    request<SemanticSearchResponse>('/search/semantic', { method: 'POST', body: json(body) }),
+  similarSamples: (sampleId: number, limit = 8) => request<SimilarSample[]>(`/samples/${sampleId}/similar?limit=${limit}`),
 
   // exports
   createExport: (body: ExportCreate) =>

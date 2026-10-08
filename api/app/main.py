@@ -5,7 +5,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.db import get_db
-from app.routers import datasets, exports, qc, samples, search
+from app.routers import datasets, exports, qc, samples, search, semantic
 
 
 @asynccontextmanager
@@ -15,7 +15,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="DataLens API", version="0.3.0", lifespan=lifespan)
-for r in (datasets, samples, qc, search, exports):
+for r in (datasets, samples, qc, search, semantic, exports):
     app.include_router(r.router)
 
 

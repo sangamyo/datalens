@@ -2,7 +2,7 @@
 
 Data-quality platform for LLM fine-tuning datasets. Import an instruction or chat dataset from the
 Hugging Face Hub, get 8 automatic quality checks on every sample, find problem rows with
-natural-language search, and export a clean, reproducible train/val split as JSONL.
+natural-language search or by meaning with embedding-based semantic search, and export a clean, reproducible train/val split as JSONL.
 
 ![Datasets](docs/screenshots/datasets.png)
 
@@ -24,12 +24,25 @@ natural-language search, and export a clean, reproducible train/val split as JSO
 - **Natural-language search** — "brainstorming samples that need review" → a validated `SampleFilter`
   (never SQL). Uses Gemini or Claude if a key is configured, otherwise (or on any LLM error) a
   deterministic rule-based parser.
+- **Semantic search (embeddings + pgvector)** — every sample's prompt + response is embedded with
+  `BAAI/bge-small-en-v1.5` (384-dim, ONNX via `fastembed`, CPU only) by a background job after import.
+  A **Semantic** mode in the search box ranks samples by cosine similarity to a query ("how to cook
+  pasta") and combines with all the filters ("…among failed samples"); the sample viewer lists the
+  **most similar samples**. Vectors live in Postgres (`vector(384)`) behind an HNSW index.
 - **Export** — filtered subset as a zip with `train.jsonl`, `val.jsonl` and `manifest.json`; `jsonl`
   (`prompt/context/response/category`) or `chat` (`messages`) format; deterministic split.
 
 On the full `databricks/databricks-dolly-15k` (15,011 rows) import takes ~7 s and QC ~15 s, and it finds
 16 exact duplicates, 341 repeated prompts with different answers, 9 near duplicates, 8 rows with PII,
 6 refusal answers, 819 very short answers, 13 length outliers and 2 non-English rows.
+
+Semantic search, measured on the same 15,011 rows (Apple M2, 8 GB, CPU only):
+- embedding all rows with the real `embed_dataset` job took **1,069 s** (1,003 s in the model, ≈14 rows/s;
+  run natively on macOS while the Docker VM and desktop apps were running). In the Docker worker (2-vCPU
+  VM) the 300-row `tatsu-lab/alpaca` import embedded in 21 s.
+- a top-25 query uses the HNSW index: **5.6 ms** median SQL time (20 queries; 9.7 ms with a category
+  filter) vs 325 ms for an exact scan, with recall@10 = 1.0 against the exact result on 50 queries.
+  Warm end-to-end API latency (embed query + SQL) was 10–20 ms.
 
 | Dataset dashboard | Sample viewer |
 |---|---|
@@ -42,16 +55,27 @@ On the full `databricks/databricks-dolly-15k` (15,011 rows) import takes ~7 s an
 ## Architecture
 
 FastAPI + SQLAlchemy 2 + Alembic · Postgres 16 with pgvector · Redis + arq worker · SeaweedFS (S3 API) ·
-React 19 + TypeScript + Vite. The browser calls `/api/*`, which the Vite dev server proxies to the API on
+React 19 + TypeScript + Vite · `fastembed` (ONNX Runtime) sentence embeddings. The browser calls `/api/*`, which the Vite dev server proxies to the API on
 port 8000 (no CORS needed). Sample text lives in Postgres; raw downloaded parquet and export zips live in
-object storage.
+object storage. Sample embeddings live next to the samples in Postgres (pgvector), so semantic ranking and
+the structured filters run as one SQL query.
 
 ```
-browser ──/api──▶ FastAPI ──▶ Postgres (datasets, samples, qc_results, exports)
+browser ──/api──▶ FastAPI ──▶ Postgres + pgvector (datasets, samples, qc_results, exports,
+                     │  │                       embeddings vector(384) + HNSW index)
+                     │  ├───▶ bge-small (ONNX, in-process): embeds the search query
                      │  └───▶ Redis ──▶ arq worker ──▶ Hugging Face Hub
-                     │                      ├──────▶ Postgres
+                     │                      ├──────▶ Postgres (samples, QC results, embeddings)
                      └──── S3 (SeaweedFS) ◀─┘ raw parquet, export zips
 ```
+
+**How semantic search works** (details and trade-offs in [docs/walkthrough.md](docs/walkthrough.md#4b-semantic-search-embeddings--pgvector)):
+after an import the worker runs `embed_dataset`: it embeds `prompt + response` of every sample without a
+vector, shortest texts first in batches of 32 (a batch is padded to its longest text, so sorting by length
+removed most padding: 3–7× faster in my runs), and commits every 512 rows (resumable, idempotent).
+A search embeds the query once in the API and runs
+`... JOIN embeddings ... WHERE <filters> ORDER BY embedding <=> :query LIMIT k` — `<=>` is pgvector's
+cosine distance, served by the HNSW index. The model (~67 MB) is downloaded once to the `hfcache` volume.
 
 Details: [docs/design.md](docs/design.md) · endpoints: [docs/api-contract.md](docs/api-contract.md) ·
 full code walkthrough and interview notes: [docs/walkthrough.md](docs/walkthrough.md).
@@ -107,13 +131,17 @@ private Hugging Face datasets.
 ```bash
 cd api
 python3.11 -m venv .venv && .venv/bin/pip install -r requirements.txt
-.venv/bin/python -m pytest -q     # 265 tests, no Docker or network needed (in-memory SQLite, mocked queue/S3/Hub)
+.venv/bin/python -m pytest -q     # 280 tests, no Docker or network needed (in-memory SQLite, mocked queue/S3/Hub/model)
+# the 4 pgvector ranking tests are skipped unless a throwaway Postgres+pgvector database is given
+# (create it once: docker compose exec db createdb -U datalens datalens_test):
+TEST_DATABASE_URL=postgresql+psycopg://datalens:<password>@localhost:5434/datalens_test .venv/bin/python -m pytest -q
 
 cd ../web
 npm run build && npm run lint     # type-check + build, oxlint
 ```
 
-CI (`.github/workflows/ci.yml`) runs the backend tests on every push.
+CI (`.github/workflows/ci.yml`) runs the backend tests on every push, with a pgvector service container
+for the ranking tests.
 
 ## Project structure
 
@@ -122,13 +150,14 @@ api/
   app/
     main.py            FastAPI app, /health, /health/ready
     config.py db.py    settings, engine/session
-    models.py          SQLAlchemy models: Dataset, Sample, QCResult, Export, Embedding
+    models.py          SQLAlchemy models: Dataset, Sample, QCResult, Export, Embedding (vector(384) + HNSW index)
+    embeddings.py      embedding model (bge-small via fastembed), sample text, query embedding
     schemas.py         Pydantic request/response models (SampleFilter, ...)
-    queries.py         SampleFilter -> SQLAlchemy WHERE clauses (shared by list, search, export)
+    queries.py         SampleFilter -> SQLAlchemy WHERE clauses (shared by list, search, export); nearest_samples
     nlsearch.py        natural-language query -> SampleFilter (LLM + rule-based fallback)
     storage.py queue.py worker.py   S3 wrapper, arq enqueue, arq WorkerSettings
-    routers/           datasets, samples, qc, search, exports
-    jobs/              import_job, qc_job, export_job (arq jobs)
+    routers/           datasets, samples, qc, search, semantic, exports
+    jobs/              import_job, qc_job, embed_job, export_job (arq jobs)
     qc/                checks.py (8 pure checks), dataset_stats.py (length stats, duplicates, MinHash/LSH)
   alembic/             migrations
   tests/               pytest suite

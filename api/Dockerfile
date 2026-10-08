@@ -1,7 +1,7 @@
 FROM python:3.11-slim
 
 WORKDIR /app
-ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 HF_HOME=/hf-cache
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 HF_HOME=/hf-cache FASTEMBED_CACHE_PATH=/hf-cache/fastembed
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir --default-timeout=120 --retries 5 -r requirements.txt

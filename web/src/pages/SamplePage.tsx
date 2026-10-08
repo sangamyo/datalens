@@ -8,6 +8,7 @@ import { Icon } from '../components/Icon'
 import { QCPill } from '../components/Pills'
 import { QCResultsList } from '../components/sample/QCResultsList'
 import { RichText } from '../components/sample/RichText'
+import { SimilarSamples } from '../components/sample/SimilarSamples'
 import { LoadingBlock, Spinner } from '../components/Spinner'
 import { useDocumentTitle } from '../hooks/useDocumentTitle'
 import { useResource } from '../hooks/useResource'
@@ -275,6 +276,8 @@ export function SamplePage() {
             </div>
             <QCResultsList results={s.qc_results} pending={s.qc_status === 'pending'} />
           </section>
+
+          <SimilarSamples sampleId={s.id} />
         </div>
       </div>
     </div>

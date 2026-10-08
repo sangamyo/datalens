@@ -142,6 +142,33 @@ export interface SearchResponse {
   total: number
 }
 
+// ---------- semantic search (embeddings) ----------
+export interface EmbeddingStatus {
+  model: string
+  dim: number
+  /** samples of the dataset with a vector for `model` */
+  embedded: number
+  total: number
+}
+
+export interface SemanticSearchRequest {
+  query: string
+  dataset_id: number
+  limit?: number
+  /** optional structured filter applied on top; its dataset_id is ignored */
+  filter?: SampleFilter
+}
+
+export interface SimilarSample extends SampleOut {
+  /** cosine similarity, 1 = same direction */
+  similarity: number
+}
+
+export interface SemanticSearchResponse {
+  model: string
+  items: SimilarSample[]
+}
+
 // ---------- exports ----------
 export interface ExportCreate {
   dataset_id: number

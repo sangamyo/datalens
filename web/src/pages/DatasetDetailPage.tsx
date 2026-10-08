@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { api, ApiError, filterToParams } from '../api/client'
-import type { QCSummary, SampleFilter } from '../api/types'
+import type { EmbeddingStatus, QCSummary, SampleFilter, SampleList } from '../api/types'
 import { CategoryBars } from '../components/dataset/CategoryBars'
 import { CheckBreakdown } from '../components/dataset/CheckBreakdown'
 import { ExportPanel } from '../components/dataset/ExportPanel'
@@ -22,6 +22,9 @@ import { isBusyStatus } from '../lib/status'
 
 const PAGE_SIZE = 25
 const POLL_MS = 2000
+const SEMANTIC_LIMIT = 25 // top-k for semantic search (one page, no pagination)
+const EMBED_POLL_MS = 3000
+const EMBED_MAX_IDLE_POLLS = 10 // stop polling embedding progress after ~30 s without progress
 
 export function DatasetDetailPage() {
   const { id } = useParams()
@@ -35,9 +38,15 @@ export function DatasetDetailPage() {
   const offset = Math.max(0, Number(params.get('offset')) || 0)
   const q = params.get('q')
   const parser = params.get('parser')
+  const semanticMode = params.get('mode') === 'semantic'
   const searchMeta: SearchMeta | null = useMemo(
-    () => (q ? { query: q, parser: parser === 'llm' ? 'llm' : 'rules' } : null),
-    [q, parser],
+    () =>
+      q
+        ? semanticMode
+          ? { query: q, mode: 'semantic' }
+          : { query: q, mode: 'nl', parser: parser === 'llm' ? 'llm' : 'rules' }
+        : null,
+    [q, parser, semanticMode],
   )
 
   useEffect(() => {
@@ -49,7 +58,8 @@ export function DatasetDetailPage() {
       const p = new URLSearchParams(filterToParams(cleanFilter(f)).replace(/^\?/, ''))
       if (meta) {
         p.set('q', meta.query)
-        p.set('parser', meta.parser)
+        if (meta.mode === 'semantic') p.set('mode', 'semantic')
+        else if (meta.parser) p.set('parser', meta.parser)
       }
       if (nextOffset) p.set('offset', String(nextOffset))
       setParams(p, { replace: true })
@@ -75,11 +85,39 @@ export function DatasetDetailPage() {
   const counts = summary.data?.counts ?? ds?.qc_counts
   const countsKey = counts ? `${counts.pass}-${counts.warn}-${counts.fail}-${counts.pending}` : ''
 
-  const samples = useResource(
-    valid ? () => api.listSamples(datasetId, filter, PAGE_SIZE, offset) : null,
+  const semanticQuery = searchMeta?.mode === 'semantic' ? searchMeta.query : null
+  const samples = useResource<SampleList>(
+    valid
+      ? semanticQuery
+        ? () =>
+            api
+              .semanticSearch({ query: semanticQuery, dataset_id: datasetId, limit: SEMANTIC_LIMIT, filter })
+              .then((r) => ({ items: r.items, total: r.items.length }))
+        : () => api.listSamples(datasetId, filter, PAGE_SIZE, offset)
+      : null,
     // refetch when filter/page change, when import progresses, and when QC counts move
     [datasetId, paramsKey, offset, ds?.num_samples, ds?.status, countsKey],
   )
+
+  // embedding progress: poll while vectors are still being written, give up when nothing moves
+  const embedIdle = useRef({ last: -1, polls: 0 })
+  const [embedPolling, setEmbedPolling] = useState(0)
+  const embeddings = useResource<EmbeddingStatus>(
+    valid ? () => api.getEmbeddingStatus(datasetId) : null,
+    [datasetId, ds?.status, embedPolling],
+    (e) => {
+      if (!e || e.embedded >= e.total) return false
+      const idle = embedIdle.current
+      idle.polls = e.embedded === idle.last ? idle.polls + 1 : 0
+      idle.last = e.embedded
+      return idle.polls < EMBED_MAX_IDLE_POLLS ? EMBED_POLL_MS : false
+    },
+  )
+  const buildEmbeddings = async () => {
+    await api.embedDataset(datasetId)
+    embedIdle.current = { last: -1, polls: 0 }
+    setEmbedPolling((n) => n + 1)
+  }
 
   const [qcBusy, setQcBusy] = useState(false)
   const [qcError, setQcError] = useState<unknown>(null)
@@ -286,6 +324,8 @@ export function DatasetDetailPage() {
             onFilterChange={setFilter}
             searchMeta={searchMeta}
             onSearch={(meta, f) => writeParams(f, meta)}
+            embeddings={embeddings.data}
+            onBuildEmbeddings={buildEmbeddings}
           />
           <SamplesTable
             data={samples.data}
@@ -296,7 +336,8 @@ export function DatasetDetailPage() {
             pageSize={PAGE_SIZE}
             onPage={(o) => writeParams(filter, searchMeta, o)}
             onRetry={samples.reload}
-            filtered={filtered}
+            filtered={filtered || semanticQuery != null}
+            ranked={semanticQuery != null}
             onClearFilter={() => writeParams({}, null)}
             importing={busy}
           />
@@ -305,7 +346,7 @@ export function DatasetDetailPage() {
           <ExportPanel
             datasetId={datasetId}
             filter={filter}
-            matching={samples.data?.total}
+            matching={semanticQuery ? undefined : samples.data?.total}
             disabled={ds.status !== 'ready'}
           />
         </div>

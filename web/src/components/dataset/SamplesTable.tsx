@@ -1,6 +1,6 @@
 import { useRef, type KeyboardEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
-import type { SampleList } from '../../api/types'
+import type { SampleList, SampleOut } from '../../api/types'
 import { formatScore } from '../../lib/format'
 import { EmptyState } from '../EmptyState'
 import { ErrorBanner } from '../ErrorBanner'
@@ -20,6 +20,7 @@ export function SamplesTable({
   filtered,
   onClearFilter,
   importing,
+  ranked,
 }: {
   data?: SampleList
   error: unknown
@@ -32,6 +33,8 @@ export function SamplesTable({
   filtered: boolean
   onClearFilter: () => void
   importing?: boolean
+  /** semantic search results: ranked by similarity, no pagination */
+  ranked?: boolean
 }) {
   const navigate = useNavigate()
   const bodyRef = useRef<HTMLTableSectionElement>(null)
@@ -65,7 +68,11 @@ export function SamplesTable({
         <div>
           <h2 id="samples-heading">Samples</h2>
           <p>
-            {data ? `${total.toLocaleString()} ${filtered ? 'matching' : 'total'}` : ' '}
+            {data
+              ? ranked
+                ? `Top ${total.toLocaleString()} by semantic similarity`
+                : `${total.toLocaleString()} ${filtered ? 'matching' : 'total'}`
+              : ' '}
             {loading && !initial && (
               <>
                 {' '}
@@ -132,6 +139,11 @@ export function SamplesTable({
                   <th scope="col" className="r hide-xs">
                     Score
                   </th>
+                  {ranked && (
+                    <th scope="col" className="r" title="Cosine similarity to the query (1 = same meaning)">
+                      Similarity
+                    </th>
+                  )}
                 </tr>
               </thead>
               <tbody ref={bodyRef}>
@@ -162,6 +174,7 @@ export function SamplesTable({
                       <QCPill status={s.qc_status} />
                     </td>
                     <td className="r num hide-xs">{formatScore(s.qc_score)}</td>
+                    {ranked && <td className="r num">{similarityOf(s)}</td>}
                   </tr>
                 ))}
               </tbody>
@@ -197,3 +210,5 @@ export function SamplesTable({
     </section>
   )
 }
+
+const similarityOf = (s: SampleOut) => ('similarity' in s && typeof s.similarity === 'number' ? s.similarity.toFixed(3) : '—')

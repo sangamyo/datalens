@@ -1,10 +1,12 @@
-"""Query helpers shared by the samples list, search and export."""
+"""Query helpers shared by the samples list, search, semantic search and export."""
 
-from sqlalchemy import Select, exists, func, or_, select
+from collections.abc import Sequence
+
+from sqlalchemy import Select, exists, func, or_, select, text
 from sqlalchemy.orm import Session
 
-from app.models import QCResult, Sample
-from app.schemas import SampleFilter, SampleOut
+from app.models import Embedding, QCResult, Sample
+from app.schemas import SampleFilter, SampleOut, SimilarSample
 
 PREVIEW_CHARS = 160
 
@@ -41,6 +43,26 @@ def find_samples(db: Session, f: SampleFilter, limit: int = 50, offset: int = 0)
     total = db.scalar(select(func.count()).select_from(base.subquery())) or 0
     rows = db.scalars(base.order_by(Sample.dataset_id, Sample.sample_index).limit(limit).offset(offset)).all()
     return list(rows), total
+
+
+def nearest_samples(
+    db: Session, vector: Sequence[float], f: SampleFilter, model: str, limit: int, exclude_id: int | None = None
+) -> list[SimilarSample]:
+    """Top-`limit` samples matching `f`, closest to `vector` by cosine distance (pgvector `<=>`).
+
+    `ORDER BY distance LIMIT k` is what lets Postgres walk the HNSW index instead of scanning every
+    vector. Filters are applied while walking it: with pgvector >= 0.8 iterative scans the index keeps
+    returning candidates until `limit` rows pass the WHERE clause (without it, a selective filter
+    could leave fewer than k results out of the default ef_search = 40 candidates).
+    """
+    distance = Embedding.embedding.cosine_distance(vector).label("distance")
+    stmt = select(Sample, distance).join(Embedding, Embedding.sample_id == Sample.id).where(Embedding.model == model)
+    stmt = apply_sample_filter(stmt, f)
+    if exclude_id is not None:
+        stmt = stmt.where(Sample.id != exclude_id)
+    db.execute(text("SET LOCAL hnsw.iterative_scan = strict_order"))  # this transaction only
+    rows = db.execute(stmt.order_by(distance).limit(limit)).all()
+    return [SimilarSample(**sample_out(s).model_dump(), similarity=round(1 - float(d), 4)) for s, d in rows]
 
 
 def sample_out(s: Sample) -> SampleOut:

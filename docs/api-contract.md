@@ -24,7 +24,7 @@ Import job: status `pending → importing → ready | failed`. Reads the Hugging
 - response: `response | output | answer | completion | chosen`
 - category: `category | task | type | label | source`
 - chat format: a `messages` / `conversations` column (list of `{role, content}` or `{from, value}`) → first user turn = prompt, first assistant turn = response.
-Stores the mapping used in `Dataset.fields`. Imports the first `max_samples` rows, then enqueues `run_dataset_qc(dataset_id)`.
+Stores the mapping used in `Dataset.fields`. Imports the first `max_samples` rows, then enqueues `run_dataset_qc(dataset_id)` and `embed_dataset(dataset_id)`.
 
 ## Samples  (owner: `routers/samples.py`)
 | Method | Path | Query | Response |
@@ -48,6 +48,22 @@ Checks (`check_name`): `empty_or_short`, `length_outlier`, `exact_duplicate`, `n
 | POST | `/search` | `SearchRequest {query, dataset_id?, limit=50}` | `SearchResponse {filter: SampleFilter, parser: "llm" \| "rules", items: SampleOut[], total}`; `404` if `dataset_id` is unknown |
 
 The query becomes a validated `SampleFilter` (never raw SQL): LLM when `GEMINI_API_KEY` or `ANTHROPIC_API_KEY` is set, otherwise (or on any LLM error) the rule-based parser.
+
+## Semantic search  (owner: `routers/semantic.py`, `jobs/embed_job.py`, `app/embeddings.py`)
+| Method | Path | Body / query | Response |
+|---|---|---|---|
+| GET | `/datasets/{id}/embeddings` | — | `EmbeddingStatus {model, dim, embedded, total}` (`embedded` = samples with a vector for the current model) |
+| POST | `/datasets/{id}/embeddings` | — | `202 Enqueued {enqueued: 1}`, enqueues `embed_dataset(dataset_id)`; `503` if the queue is down. Also enqueued automatically after every import. |
+| POST | `/search/semantic` | `SemanticSearchRequest {query (1..500 chars), dataset_id, limit=25 (1..100), filter?: SampleFilter}` | `SemanticSearchResponse {model, items: SimilarSample[]}`, most similar first. `404` unknown dataset, `409` dataset has no embeddings yet, `503` embedding model unavailable |
+| GET | `/samples/{id}/similar` | `limit=10` (1..50) | `SimilarSample[]`: nearest samples in the same dataset, the sample itself excluded. `404` unknown sample, `409` sample not embedded yet |
+
+`SimilarSample` = `SampleOut` + `similarity` (cosine similarity = `1 - cosine distance`, in [-1, 1]; 1 = same direction).
+
+- Model: `BAAI/bge-small-en-v1.5` (384 dims, quantized ONNX via `fastembed`, CPU). Stored in `embeddings(sample_id unique, model, embedding vector(384))` with an HNSW index (`vector_cosine_ops`, migration `0002`).
+- Sample text embedded = `prompt + "\n\n" + response` (context excluded), cut to 2,000 chars; the model truncates at 512 tokens.
+- Search queries are prefixed with bge's retrieval instruction (`"Represent this sentence for searching relevant passages: "`); sample-to-sample similarity uses the stored vectors directly.
+- `filter` is the same `SampleFilter` as the samples list (its `dataset_id` is replaced by the request's), so semantic ranking combines with QC status, category, tokens, `text_contains`, `failed_check`.
+- `embed_dataset` is incremental: it embeds only samples without a vector for the current model (vectors of another model are deleted first), commits every 512 samples, and inserts with `ON CONFLICT (sample_id) DO NOTHING`.
 
 ## Exports  (owner: `routers/exports.py`, `jobs/export_job.py`)
 | Method | Path | Body | Response |
