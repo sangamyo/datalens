@@ -6,12 +6,14 @@ import { EmptyState } from '../components/EmptyState'
 import { ErrorBanner } from '../components/ErrorBanner'
 import { Icon } from '../components/Icon'
 import { QCPill } from '../components/Pills'
+import { ReadOnlyNote } from '../components/ReadOnlyNote'
 import { QCResultsList } from '../components/sample/QCResultsList'
 import { RichText } from '../components/sample/RichText'
 import { SimilarSamples } from '../components/sample/SimilarSamples'
 import { LoadingBlock, Spinner } from '../components/Spinner'
 import { useDocumentTitle } from '../hooks/useDocumentTitle'
 import { useResource } from '../hooks/useResource'
+import { STATIC_DEMO } from '../lib/demo'
 import { recallDatasetSearch } from '../lib/filter'
 import { formatScore } from '../lib/format'
 import { piiKindClass, piiKindLabel } from '../lib/pii'
@@ -157,9 +159,10 @@ export function SamplePage() {
               </>
             )}
           </p>
+          {STATIC_DEMO && <ReadOnlyNote />}
         </div>
         <div className="page-head__actions">
-          <button type="button" className="btn" onClick={rerunQC} disabled={rerunning}>
+          <button type="button" className="btn" onClick={rerunQC} disabled={rerunning || STATIC_DEMO}>
             {rerunning ? <Spinner size={12} /> : <Icon name="refresh" size={14} />}
             {rerunning ? 'Re-running…' : 'Re-run QC'}
           </button>

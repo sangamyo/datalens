@@ -1,7 +1,9 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { api } from '../../api/client'
+import { warmUpQueryModel } from '../../api/static/embed'
 import type { CategoryCount, EmbeddingStatus, QCStatus, SampleFilter } from '../../api/types'
 import { CHECK_NAMES, QC_STATUSES, checkLabel } from '../../api/types'
+import { STATIC_DEMO } from '../../lib/demo'
 import { cleanFilter, filterChips, type FilterKey } from '../../lib/filter'
 import { ErrorBanner } from '../ErrorBanner'
 import { Icon } from '../Icon'
@@ -64,6 +66,11 @@ export function SearchPanel({
   const [error, setError] = useState<unknown>(null)
   const semantic = mode === 'semantic'
   const noEmbeddings = semantic && embeddings?.embedded === 0
+
+  // static demo: queries are embedded in the browser, so fetch the model as soon as Semantic is picked
+  useEffect(() => {
+    if (STATIC_DEMO && semantic) warmUpQueryModel()
+  }, [semantic])
 
   const run = async (q: string) => {
     const text = q.trim()
@@ -161,6 +168,12 @@ export function SearchPanel({
           </button>
         </form>
 
+        {STATIC_DEMO && semantic && (
+          <span className="field__hint">
+            Your query is embedded in the browser with the same model (bge-small, ~34 MB, downloaded once).
+          </span>
+        )}
+
         {semantic && embeddings && embeddings.embedded < embeddings.total && (
           <div className="embed-status" role="status">
             {embeddings.embedded === 0 ? (
@@ -171,7 +184,7 @@ export function SearchPanel({
                 {embeddings.total.toLocaleString()} — results only cover embedded samples.
               </span>
             )}
-            <button type="button" className="btn btn--sm" onClick={buildEmbeddings} disabled={busy}>
+            <button type="button" className="btn btn--sm" onClick={buildEmbeddings} disabled={busy || STATIC_DEMO}>
               <Icon name="refresh" size={12} /> {embeddings.embedded === 0 ? 'Build embeddings' : 'Resume'}
             </button>
           </div>

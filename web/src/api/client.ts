@@ -17,17 +17,12 @@ import type {
   SemanticSearchResponse,
   SimilarSample,
 } from './types'
+import { ApiError } from './errors'
+import { staticApi } from './static/api'
+
+export { ApiError }
 
 export const API_BASE = '/api'
-
-export class ApiError extends Error {
-  status: number
-  constructor(status: number, message: string) {
-    super(message)
-    this.name = 'ApiError'
-    this.status = status
-  }
-}
 
 function detailToMessage(detail: unknown): string | null {
   if (typeof detail === 'string') return detail
@@ -101,7 +96,7 @@ export function filterToParams(filter: SampleFilter, extra: Record<string, numbe
   return s ? `?${s}` : ''
 }
 
-export const api = {
+const httpApi = {
   // datasets
   listDatasets: () => request<DatasetOut[]>('/datasets'),
   getDataset: (id: number) => request<DatasetDetail>(`/datasets/${id}`),
@@ -138,6 +133,13 @@ export const api = {
   getExport: (id: number) => request<ExportOut>(`/exports/${id}`),
   exportDownloadUrl: (id: number) => `${API_BASE}/exports/${id}/download`,
 }
+
+export type Api = typeof httpApi
+
+/** The static demo build (lib/demo.ts) answers every call in the browser from a snapshot (see api/static/).
+ * The env flag is tested here directly rather than through STATIC_DEMO: that lets the bundler see the
+ * static layer is unused and drop it from normal builds. */
+export const api: Api = import.meta.env.VITE_STATIC_DEMO === '1' ? staticApi : httpApi
 
 export function errorMessage(err: unknown): string {
   if (err instanceof Error) return err.message

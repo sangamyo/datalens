@@ -12,10 +12,12 @@ import { TokenHistogram } from '../components/dataset/TokenHistogram'
 import { EmptyState } from '../components/EmptyState'
 import { ErrorBanner } from '../components/ErrorBanner'
 import { Icon } from '../components/Icon'
+import { ReadOnlyNote } from '../components/ReadOnlyNote'
 import { StatusPill } from '../components/Pills'
 import { LoadingBlock, Spinner } from '../components/Spinner'
 import { useDocumentTitle } from '../hooks/useDocumentTitle'
 import { useResource } from '../hooks/useResource'
+import { STATIC_DEMO } from '../lib/demo'
 import { cleanFilter, filterFromParams, isEmptyFilter, rememberDatasetSearch } from '../lib/filter'
 import { formatDate } from '../lib/format'
 import { isBusyStatus } from '../lib/status'
@@ -227,10 +229,16 @@ export function DatasetDetailPage() {
           )}
         </div>
         <div className="page-head__actions">
-          <button type="button" className="btn" onClick={runQC} disabled={qcBusy || busy || ds.status === 'failed'}>
+          <button
+            type="button"
+            className="btn"
+            onClick={runQC}
+            disabled={qcBusy || busy || ds.status === 'failed' || STATIC_DEMO}
+          >
             {qcBusy || qcRunning ? <Spinner size={12} /> : <Icon name="refresh" size={14} />}
             {qcRunning ? 'QC running…' : 'Run QC again'}
           </button>
+          {STATIC_DEMO && <ReadOnlyNote />}
         </div>
       </div>
 

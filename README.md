@@ -126,6 +126,20 @@ Only the query text is sent to the LLM; its JSON answer is strictly validated an
 the rule parser. The search response says which parser was used. `HF_TOKEN` is only needed for gated or
 private Hugging Face datasets.
 
+### Static demo (no backend)
+
+`deploy/hf-static/` builds a read-only copy of the UI for a static host (e.g. a Hugging Face static Space):
+`VITE_STATIC_DEMO=1` swaps the API client for an in-browser one over a snapshot of a real instance (3,000 Dolly
+rows with QC results and embeddings). Filters, NL search (a TypeScript port of the rule-based parser) and cosine
+ranking run in the browser; semantic queries are embedded with the same bge-small model via transformers.js.
+Imports, QC re-runs and exports are disabled. Uses hash routing (`/#/datasets/1`).
+
+```bash
+deploy/hf-static/snapshot.sh   # boot the all-in-one image, wait for QC + embeddings, export to deploy/hf-static/data
+deploy/hf-static/build.sh      # static site in deploy/hf-static/out (index.html, assets/, data/, Space README)
+python3 -m http.server -d deploy/hf-static/out 8080
+```
+
 ## Tests
 
 ```bash

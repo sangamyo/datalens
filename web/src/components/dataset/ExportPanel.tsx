@@ -2,6 +2,7 @@ import { useId, useState } from 'react'
 import { api } from '../../api/client'
 import type { ExportFormat, ExportOut, SampleFilter } from '../../api/types'
 import { useResource } from '../../hooks/useResource'
+import { STATIC_DEMO } from '../../lib/demo'
 import { describeFilter } from '../../lib/filter'
 import { formatDate, plural, relativeTime } from '../../lib/format'
 import { isBusyStatus } from '../../lib/status'
@@ -9,6 +10,7 @@ import { EmptyState } from '../EmptyState'
 import { ErrorBanner } from '../ErrorBanner'
 import { Icon } from '../Icon'
 import { StatusPill } from '../Pills'
+import { ReadOnlyNote } from '../ReadOnlyNote'
 import { LoadingBlock, Spinner } from '../Spinner'
 
 const FORMATS: { value: ExportFormat; label: string; hint: string }[] = [
@@ -117,15 +119,21 @@ export function ExportPanel({
             </span>
           )}
         </div>
-        <button type="button" className="btn btn--primary" onClick={create} disabled={creating || disabled || matching === 0}>
+        <button
+          type="button"
+          className="btn btn--primary"
+          onClick={create}
+          disabled={creating || disabled || matching === 0 || STATIC_DEMO}
+        >
           {creating ? <Spinner size={12} /> : <Icon name="package" size={14} />}
           Create export
         </button>
+        {STATIC_DEMO && <ReadOnlyNote />}
         {matching === 0 && <span className="field__hint">No samples match the current filter.</span>}
         {createError != null && <ErrorBanner title="Export failed" error={createError} />}
       </div>
 
-      {exports.initial && exports.loading ? (
+      {STATIC_DEMO ? null : exports.initial && exports.loading ? (
         <LoadingBlock label="Loading exports…" />
       ) : exports.error != null && !exports.data ? (
         <div className="card__body" style={{ paddingTop: 0 }}>

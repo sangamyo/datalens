@@ -8,9 +8,11 @@ import { ErrorBanner } from '../components/ErrorBanner'
 import { Icon } from '../components/Icon'
 import { StatusPill } from '../components/Pills'
 import { QCDistributionBar } from '../components/dataset/QCSummaryCards'
+import { ReadOnlyNote } from '../components/ReadOnlyNote'
 import { LoadingBlock, Spinner } from '../components/Spinner'
 import { useDocumentTitle } from '../hooks/useDocumentTitle'
 import { useResource } from '../hooks/useResource'
+import { STATIC_DEMO } from '../lib/demo'
 import { formatDate, relativeTime } from '../lib/format'
 import { isBusyStatus } from '../lib/status'
 
@@ -191,7 +193,7 @@ function ImportForm({ onImported }: { onImported: (d: DatasetOut) => void }) {
     setTouched(true)
     setError(null)
     setSuccess(null)
-    if (repoErr || maxErr || splitErr) return
+    if (repoErr || maxErr || splitErr || STATIC_DEMO) return
     setSubmitting(true)
     try {
       const d = await api.importDataset({
@@ -307,11 +309,12 @@ function ImportForm({ onImported }: { onImported: (d: DatasetOut) => void }) {
               aria-describedby={`${uid}-msg`}
             />
           </div>
-          <button type="submit" className="btn btn--primary" disabled={submitting}>
+          <button type="submit" className="btn btn--primary" disabled={submitting || STATIC_DEMO}>
             {submitting ? <Spinner size={12} /> : <Icon name="download" size={14} />}
             Import
           </button>
         </div>
+        {STATIC_DEMO && <ReadOnlyNote />}
 
         <details className="disclosure">
           <summary>
@@ -490,13 +493,15 @@ function DatasetTable({
                   <span className="secondary">{relativeTime(d.created_at) || formatDate(d.created_at)}</span>
                 </td>
                 <td className="r">
-                  <ConfirmButton
-                    small
-                    label="Delete"
-                    ariaLabel={`Delete ${d.hf_repo_id}`}
-                    prompt="Delete?"
-                    onConfirm={() => onDelete(d.id)}
-                  />
+                  {!STATIC_DEMO && (
+                    <ConfirmButton
+                      small
+                      label="Delete"
+                      ariaLabel={`Delete ${d.hf_repo_id}`}
+                      prompt="Delete?"
+                      onConfirm={() => onDelete(d.id)}
+                    />
+                  )}
                 </td>
               </tr>
             )
