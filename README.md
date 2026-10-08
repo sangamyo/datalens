@@ -1,5 +1,7 @@
 # DataLens
 
+**Live demo:** https://huggingface.co/spaces/sangamyo/datalens (static, read-only snapshot — QC results, filters, NL and semantic search run in your browser)
+
 Data-quality platform for LLM fine-tuning datasets. Import an instruction or chat dataset from the
 Hugging Face Hub, get 8 automatic quality checks on every sample, find problem rows with
 natural-language search or by meaning with embedding-based semantic search, and export a clean, reproducible train/val split as JSONL.
